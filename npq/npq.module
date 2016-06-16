@@ -1,0 +1,85 @@
+<?php
+
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Queue\QueueFactory;
+use Drupal\Core\Queue\QueueInterface;
+use Drupal\Core\Queue\SuspendQueueException;
+
+/**
+ * Implements hook_entity_insert().
+ */
+function npq_entity_insert(EntityInterface $entity) {
+//  if ($entity->getEntityTypeId() !== 'node') {
+//    return;
+//  }
+////echo '<pre>'; print_r($entity->get('status')->value); exit;
+//  /*if ($entity->get('status')->value == 1) {
+//    return;
+//  }*/
+//
+//  $query = \Drupal::entityQuery('node')
+//    ->condition('status', 0);
+//  $nids = $query->execute();
+//
+//  /** @var QueueFactory $queue_factory */
+//  $queue_factory = \Drupal::service('queue');
+//  /** @var QueueInterface $queue */
+//  $queue = $queue_factory->get('kkk');
+//
+//  foreach ($nids as $nid) {
+//    $item = new \stdClass();
+//    $item->nid = $nid;
+//    // $queue->createItem($item);
+//  }
+}
+
+/**
+ * hook_cron()
+ */
+function npq_cron() {
+  $query = \Drupal::entityQuery('node')
+    ->condition('status', 0);
+  $nids = $query->execute();
+
+  /** @var QueueFactory $queue_factory */
+  $queue_factory = \Drupal::service('queue');
+  /** @var QueueInterface $queue */
+  $queue = $queue_factory->get('FRESH');
+
+  foreach ($nids as $nid) {
+    $item = new \stdClass();
+    $item->nid = $nid;
+    $queue->createItem($item);
+  }
+
+  // Publish nodes, if any unpublished node's exist.
+  publishOnlyIfUnpublishExistOnCron($queue);
+}
+
+/**
+ * Publish node, if only un-publish nodes exist.
+ *
+ * @param QueueInterface $queue
+ */
+function publishOnlyIfUnpublishExistOnCron(QueueInterface $queue) {
+  /** @var \Drupal\Core\Queue\QueueWorkerInterface $queue_worker */
+  $queue_worker1 = \Drupal::service('plugin.manager.queue_worker');
+  $queue_worker = $queue_worker1->createInstance('customized_node_publisher');
+
+  if ($queue->numberOfItems() != 0) {
+    while($item = $queue->claimItem()) {
+      try {
+        $queue_worker->processItem($item->data);
+        $queue->deleteItem($item);
+      }
+      catch (SuspendQueueException $e) {
+        $queue->releaseItem($item);
+        break;
+      }
+      catch (\Exception $e) {
+        watchdog_exception('npq', $e);
+      }
+    }
+  }
+}
+
